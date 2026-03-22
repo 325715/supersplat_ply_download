@@ -229,6 +229,20 @@ async function writeResponseToOpfs(path: string, response: Response): Promise<vo
   }
 }
 
+function createUrlReadTarget(inputUrl: string): { fileSystem: UrlReadFileSystem; filename: string } {
+  const parsed = new URL(inputUrl);
+  const filename = parsed.pathname.split("/").filter(Boolean).pop();
+  if (!filename) {
+    throw new Error(`Could not derive a filename from URL: ${inputUrl}`);
+  }
+
+  const baseUrl = new URL("./", parsed).toString();
+  return {
+    fileSystem: new UrlReadFileSystem(baseUrl),
+    filename,
+  };
+}
+
 async function convertInputsToPly(
   request: WorkerRequest,
   resolved: ResolveResult,
@@ -239,7 +253,6 @@ async function convertInputsToPly(
   cacheInfo: CacheInfo,
   lodInfo?: LodInfo,
 ): Promise<WorkerDownload> {
-  const fs = new UrlReadFileSystem();
   let merged: Awaited<ReturnType<typeof readFile>>[number] | null = null;
 
   for (let index = 0; index < inputUrls.length; index += 1) {
@@ -252,12 +265,13 @@ async function convertInputsToPly(
       lodInfo,
     });
 
+    const readTarget = createUrlReadTarget(url);
     const tables = await readFile({
-      filename: url,
-      inputFormat: getInputFormat(url),
+      filename: readTarget.filename,
+      inputFormat: getInputFormat(readTarget.filename),
       options: {},
       params: [],
-      fileSystem: fs,
+      fileSystem: readTarget.fileSystem,
     });
 
     if (tables.length === 0) {
