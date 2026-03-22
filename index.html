@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SuperSplat PLY Download</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <h1 class="brand-title" data-i18n="brand.title">SuperSplat PLY Download</h1>
+          <p class="brand-subtitle" data-i18n="brand.subtitle">一个简易的 SuperSplat 网址下载模型的简易下载器。</p>
+        </div>
+        <div class="locale-switch" aria-label="Language switch">
+          <button type="button" class="locale-button" data-lang-button="zh">中文</button>
+          <button type="button" class="locale-button" data-lang-button="en">English</button>
+        </div>
+      </header>
+
+      <main class="content-grid">
+        <section class="panel form-panel">
+          <div class="panel-head">
+            <h2 class="panel-title" data-i18n="form.title">输入</h2>
+          </div>
+
+          <form id="converter-form" class="converter-form">
+            <div class="field-block">
+              <label for="scene-url" class="field-label" data-i18n="form.sceneLabel">SuperSplat 链接或场景 ID</label>
+              <div class="input-row">
+                <input
+                  id="scene-url"
+                  name="scene-url"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  data-i18n-placeholder="form.scenePlaceholder"
+                  placeholder="例如 https://superspl.at/scene/8429e5e2 或 8429e5e2"
+                />
+                <button id="convert-button" type="submit" class="primary-button" data-i18n="form.convert">开始转换</button>
+              </div>
+            </div>
+
+            <div class="toggle-grid">
+              <label class="toggle-card">
+                <input id="split-lods" type="checkbox" checked />
+                <span>
+                  <strong data-i18n="form.splitTitle">分级导出 LOD</strong>
+                  <small data-i18n="form.splitDesc">默认开启。流式场景会按 LOD 分别导出。</small>
+                </span>
+              </label>
+
+              <label class="toggle-card">
+                <input id="include-environment" type="checkbox" checked />
+                <span>
+                  <strong data-i18n="form.envTitle">包含环境层</strong>
+                  <small data-i18n="form.envDesc">如果场景提供环境 splats，会一起并入导出结果。</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="range-card">
+              <div class="panel-head compact">
+                <div>
+                  <h3 class="section-title" data-i18n="form.rangeTitle">LOD 范围</h3>
+                  <p class="section-note" data-i18n="form.rangeDesc">留空表示包含全部可用级别。</p>
+                </div>
+              </div>
+              <div class="range-grid">
+                <label class="range-field">
+                  <span data-i18n="form.rangeStart">起始</span>
+                  <input id="lod-min-level" type="number" min="0" inputmode="numeric" />
+                </label>
+                <label class="range-field">
+                  <span data-i18n="form.rangeEnd">结束</span>
+                  <input id="lod-max-level" type="number" min="0" inputmode="numeric" />
+                </label>
+              </div>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel status-panel">
+          <div class="panel-head">
+            <h2 class="panel-title" data-i18n="status.title">状态</h2>
+            <span id="busy-pill" class="busy-pill hidden" data-i18n="log.busy">处理中</span>
+          </div>
+
+          <div id="status-banner" class="status-banner status-banner-idle">
+            <p id="status-banner-title" class="status-banner-title">Ready</p>
+            <p id="status-banner-detail" class="status-banner-detail">Paste a scene URL to begin.</p>
+          </div>
+
+          <div class="status-list">
+            <div class="status-item">
+              <span class="status-label" data-i18n="status.detectedLabel">识别类型</span>
+              <p id="detected-kind" class="status-value"></p>
+            </div>
+            <div class="status-item status-item-wide">
+              <span class="status-label" data-i18n="status.resolvedLabel">内容地址</span>
+              <p id="resolved-url" class="status-value mono"></p>
+            </div>
+            <div class="status-item">
+              <span class="status-label" data-i18n="status.lodLabel">LOD 信息</span>
+              <p id="lod-info" class="status-value"></p>
+            </div>
+            <div class="status-item">
+              <span class="status-label" data-i18n="status.progressLabel">进度</span>
+              <p id="progress-text" class="status-value"></p>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel log-panel">
+          <div class="panel-head">
+            <h2 class="panel-title" data-i18n="log.title">日志</h2>
+          </div>
+          <pre id="log-output" class="log-output"></pre>
+        </section>
+
+        <section class="panel downloads-panel">
+          <div class="panel-head">
+            <h2 class="panel-title" data-i18n="downloads.title">结果</h2>
+            <button id="clear-results" type="button" class="secondary-button" data-i18n="downloads.clear">清理缓存</button>
+          </div>
+
+          <p class="section-note downloads-note" data-i18n="downloads.note">结果会先写入浏览器缓存，点击文件后通过 Save As 导出。</p>
+
+          <div class="downloads-options">
+            <label class="inline-option">
+              <input id="auto-clear-cache" type="checkbox" />
+              <span data-i18n="downloads.autoClear">所有结果至少保存一次后自动清理缓存</span>
+            </label>
+            <label class="inline-option">
+              <input id="clear-cache-on-close" type="checkbox" checked />
+              <span data-i18n="downloads.clearOnClose">关闭当前标签页时自动清理缓存</span>
+            </label>
+          </div>
+
+          <div id="downloads" class="downloads-list empty"></div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

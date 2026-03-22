@@ -1,0 +1,17 @@
+{
+  "name": "supersplat-web-converter",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@playcanvas/splat-transform": "^1.9.2",
+    "playcanvas": "^2.17.2",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.1"
+  }
+}

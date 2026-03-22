@@ -1,0 +1,13 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+*.tmp
+*.log
+*.ply
+*.zip
+
+# downloaded scene outputs
+/download_manifest.json
+downloads/
