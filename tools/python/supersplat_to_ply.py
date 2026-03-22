@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
 from supersplat_sog_downloader import (
@@ -28,6 +29,14 @@ from supersplat_sog_downloader import (
     extract_scene_hash,
     infer_output_dir,
     is_lod_meta,
+)
+
+CONTAINER_IMAGE = "node:22-bookworm"
+ABI_ERROR_MARKERS = (
+    "GLIBCXX_",
+    "ERR_DLOPEN_FAILED",
+    "libstdc++.so.6",
+    "webgpu/dist/linux-x64.dawn.node",
 )
 
 
@@ -69,16 +78,33 @@ def find_command(candidates: list[str]) -> str | None:
     return None
 
 
-def build_transform_command(meta_path: Path, ply_path: Path) -> list[str]:
+def build_native_transform_command(
+    meta_inputs: list[Path],
+    ply_path: Path,
+    overwrite: bool = False,
+) -> list[str]:
+    overwrite_args = ["-w"] if overwrite else []
     splat_transform = find_command(
         ["splat-transform", "splat-transform.cmd", "splat-transform.exe"]
     )
     if splat_transform:
-        return [splat_transform, str(meta_path), str(ply_path)]
+        return [
+            splat_transform,
+            *overwrite_args,
+            *(str(path) for path in meta_inputs),
+            str(ply_path),
+        ]
 
     npx = find_command(["npx", "npx.cmd"])
     if npx:
-        return [npx, "--yes", "@playcanvas/splat-transform", str(meta_path), str(ply_path)]
+        return [
+            npx,
+            "--yes",
+            "@playcanvas/splat-transform",
+            *overwrite_args,
+            *(str(path) for path in meta_inputs),
+            str(ply_path),
+        ]
 
     npm = find_command(["npm", "npm.cmd"])
     if npm:
@@ -88,7 +114,8 @@ def build_transform_command(meta_path: Path, ply_path: Path) -> list[str]:
             "--yes",
             "@playcanvas/splat-transform",
             "--",
-            str(meta_path),
+            *overwrite_args,
+            *(str(path) for path in meta_inputs),
             str(ply_path),
         ]
 
@@ -96,6 +123,67 @@ def build_transform_command(meta_path: Path, ply_path: Path) -> list[str]:
         "Could not find 'splat-transform', 'npx', or 'npm'. "
         "Please install Node.js or install @playcanvas/splat-transform first."
     )
+
+
+def find_container_runtime() -> str | None:
+    return find_command(["docker", "docker.exe", "podman", "podman.exe"])
+
+
+def to_container_relative(path: Path, root: Path) -> str:
+    relative = path.resolve().relative_to(root.resolve())
+    return PurePosixPath(*relative.parts).as_posix()
+
+
+def build_container_transform_command(
+    meta_inputs: list[Path],
+    ply_path: Path,
+    overwrite: bool = False,
+) -> list[str] | None:
+    runtime = find_container_runtime()
+    if not runtime:
+        return None
+
+    mount_root = Path(
+        os.path.commonpath([str(path.resolve().parent) for path in [*meta_inputs, ply_path]])
+    ).resolve()
+
+    container_inputs = [to_container_relative(path, mount_root) for path in meta_inputs]
+    container_output = to_container_relative(ply_path, mount_root)
+    volume = f"{mount_root}:/workspace"
+    overwrite_args = ["-w"] if overwrite else []
+
+    return [
+        runtime,
+        "run",
+        "--rm",
+        "-v",
+        volume,
+        "-w",
+        "/workspace",
+        CONTAINER_IMAGE,
+        "npx",
+        "--yes",
+        "@playcanvas/splat-transform",
+        *overwrite_args,
+        *container_inputs,
+        container_output,
+    ]
+
+
+def run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, text=True, capture_output=True)
+
+
+def emit_completed_process_output(result: subprocess.CompletedProcess[str]) -> None:
+    if result.stdout:
+        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+    if result.stderr:
+        print(result.stderr, end="" if result.stderr.endswith("\n") else "\n", file=sys.stderr)
+
+
+def looks_like_abi_error(result: subprocess.CompletedProcess[str]) -> bool:
+    text = f"{result.stdout}\n{result.stderr}"
+    return any(marker in text for marker in ABI_ERROR_MARKERS)
 
 
 def collect_local_meta_inputs(root_meta_path: Path) -> list[Path]:
@@ -195,23 +283,50 @@ def collect_split_lod_inputs(
     return dict(sorted(lod_groups.items()))
 
 
-def run_transform(meta_inputs: list[Path], ply_path: Path) -> None:
+def run_transform(meta_inputs: list[Path], ply_path: Path, overwrite: bool = False) -> None:
     if not meta_inputs:
         raise DownloaderError("No input meta.json files were found for conversion.")
 
-    command = build_transform_command(meta_inputs[0], ply_path)
-    if len(meta_inputs) > 1:
-        command = command[:-2] + [str(path) for path in meta_inputs] + [str(ply_path)]
-
+    native_command = build_native_transform_command(meta_inputs, ply_path, overwrite=overwrite)
     print(f"Inputs   : {len(meta_inputs)} meta.json files")
     print(f"Convert  : {ply_path}")
-    print(f"Command  : {' '.join(command)}")
-    try:
-        subprocess.run(command, check=True)
-    except FileNotFoundError as exc:
-        raise DownloaderError(f"Failed to launch conversion command: {exc}") from exc
-    except subprocess.CalledProcessError as exc:
-        raise DownloaderError(f"splat-transform exited with code {exc.returncode}") from exc
+    print(f"Command  : {' '.join(native_command)}")
+
+    native_result = run_command(native_command)
+    emit_completed_process_output(native_result)
+    if native_result.returncode == 0:
+        return
+
+    if looks_like_abi_error(native_result):
+        container_command = build_container_transform_command(
+            meta_inputs,
+            ply_path,
+            overwrite=overwrite,
+        )
+        if container_command:
+            runtime_name = Path(container_command[0]).name
+            print(
+                "Fallback : native splat-transform failed due to Linux runtime compatibility."
+            )
+            print(
+                f"Fallback : retrying inside {runtime_name} with {CONTAINER_IMAGE}"
+            )
+            print(f"Command  : {' '.join(container_command)}")
+            container_result = run_command(container_command)
+            emit_completed_process_output(container_result)
+            if container_result.returncode == 0:
+                return
+            raise DownloaderError(
+                f"Container fallback exited with code {container_result.returncode}"
+            )
+
+        raise DownloaderError(
+            "splat-transform failed because this Linux environment is missing a new enough libstdc++ "
+            "runtime for the bundled WebGPU native module. Install Docker/Podman to use the automatic "
+            f"container fallback, or run the script on a newer Linux distribution. Native exit code: {native_result.returncode}"
+        )
+
+    raise DownloaderError(f"splat-transform exited with code {native_result.returncode}")
 
 
 def resolve_split_output_paths(
@@ -314,7 +429,7 @@ def main() -> int:
                 ply_path = output_paths[level]
                 ply_path.parent.mkdir(parents=True, exist_ok=True)
                 print(f"LOD      : {level}")
-                run_transform(meta_inputs, ply_path)
+                run_transform(meta_inputs, ply_path, overwrite=args.overwrite)
                 if not ply_path.exists():
                     raise DownloaderError(
                         f"Conversion finished but output PLY was not found: {ply_path}"
@@ -330,14 +445,14 @@ def main() -> int:
             ply_path.parent.mkdir(parents=True, exist_ok=True)
             if is_json_meta_path(input_path):
                 meta_inputs = collect_local_meta_inputs(input_path)
-                run_transform(meta_inputs, ply_path)
+                run_transform(meta_inputs, ply_path, overwrite=args.overwrite)
             elif is_direct_scene_file(input_path):
                 if scene_kind == "ply" or input_path.suffix.lower() == ".ply" and not input_path.name.lower().endswith(".compressed.ply"):
                     if input_path.resolve() != ply_path.resolve():
                         shutil.copyfile(input_path, ply_path)
                     print(f"[ok]   {ply_path}")
                 else:
-                    run_transform([input_path], ply_path)
+                    run_transform([input_path], ply_path, overwrite=args.overwrite)
             else:
                 raise DownloaderError(f"Unsupported local input file: {input_path}")
 

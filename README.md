@@ -18,21 +18,22 @@ This repository contains two parts:
 - Converts published public scene payloads into `PLY`
 - Supports split export for streamed LOD scenes
 - Frontend runs fully in the browser, with no backend service required
+- Python CLI works on Windows and Linux
 
 ## Project Structure
 
 ```text
 .
-├─ docs/
-│  └─ README.zh-CN.md
-├─ tools/
-│  └─ python/
-│     ├─ supersplat_sog_downloader.py
-│     └─ supersplat_to_ply.py
-├─ src/
-├─ index.html
-├─ package.json
-└─ README.md
+|-- docs/
+|   `-- README.zh-CN.md
+|-- tools/
+|   `-- python/
+|       |-- supersplat_sog_downloader.py
+|       `-- supersplat_to_ply.py
+|-- src/
+|-- index.html
+|-- package.json
+`-- README.md
 ```
 
 ## Python CLI
@@ -54,6 +55,31 @@ Optional manual install:
 ```bash
 npm install -g @playcanvas/splat-transform
 ```
+
+### Linux / WSL compatibility
+
+On some older Linux or WSL environments, native `@playcanvas/splat-transform` may fail with errors such as:
+
+- `GLIBCXX_3.4.29 not found`
+- `ERR_DLOPEN_FAILED`
+- `libstdc++.so.6`
+- `webgpu/dist/linux-x64.dawn.node`
+
+This usually means the distro runtime is too old for the bundled native `webgpu` module. In that case, `sudo apt install libstdc++6` may still not help if the distro repository itself only provides an older `libstdc++`.
+
+Recommended Linux versions:
+
+- Ubuntu 22.04 or newer
+- Ubuntu 24.04 recommended
+- Debian 12 or newer
+
+If you hit the errors above, the recommended options are:
+
+- Upgrade your Linux / WSL distribution to a newer version
+- Use the browser frontend instead of the Python CLI for quick one-off conversions
+- Use Windows directly if your local Windows environment already works
+
+For older Linux / WSL environments, upgrading the distro is more reliable than trying to patch `libstdc++` manually.
 
 ### Download published SuperSplat resources only
 
@@ -97,6 +123,8 @@ Optional arguments:
 python tools/python/supersplat_to_ply.py "https://superspl.at/scene/67841e9d" --overwrite
 python tools/python/supersplat_to_ply.py "https://superspl.at/scene/67841e9d" --workdir ./downloads -o ./output/scene.ply
 ```
+
+If you hit Linux / WSL runtime errors here, upgrading the distro or using the browser frontend is recommended.
 
 ### Split LOD export
 
@@ -178,6 +206,7 @@ Limitations:
 
 - Small and medium scenes, quick testing: use the web app
 - Large streamed LOD scenes or batch workflows: use `tools/python/supersplat_to_ply.py`
+- Older Linux / WSL with native `GLIBCXX` or `webgpu` errors: upgrade the distro or use the browser frontend
 
 ## References
 

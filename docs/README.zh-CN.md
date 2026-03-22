@@ -8,8 +8,8 @@
 
 这个仓库包含两部分：
 
-- `tools/python/` 里的 Python CLI：适合本地批量下载、转换、处理大场景
-- 浏览器前端：适合直接打开网页，粘贴 `superspl.at` 链接后导出 `PLY`
+- `tools/python/` 里的 Python CLI，适合本地批量下载、转换、处理大场景
+- 浏览器前端，适合直接打开网页，粘贴 `superspl.at` 链接后导出 `PLY`
 
 ## 功能概览
 
@@ -18,21 +18,22 @@
 - 支持把公开发布的场景资源转换为 `PLY`
 - LOD 场景支持按级别拆分导出
 - 前端版本纯浏览器运行，不需要后端服务
+- Python CLI 同时兼容 Windows 和 Linux
 
 ## 目录结构
 
 ```text
 .
-├─ docs/
-│  └─ README.zh-CN.md
-├─ tools/
-│  └─ python/
-│     ├─ supersplat_sog_downloader.py
-│     └─ supersplat_to_ply.py
-├─ src/
-├─ index.html
-├─ package.json
-└─ README.md
+|-- docs/
+|   `-- README.zh-CN.md
+|-- tools/
+|   `-- python/
+|       |-- supersplat_sog_downloader.py
+|       `-- supersplat_to_ply.py
+|-- src/
+|-- index.html
+|-- package.json
+`-- README.md
 ```
 
 ## Python 用法
@@ -54,6 +55,31 @@
 ```bash
 npm install -g @playcanvas/splat-transform
 ```
+
+### Linux / WSL 兼容说明
+
+在一些较老的 Linux 或 WSL 环境里，原生 `@playcanvas/splat-transform` 可能会报这类错误：
+
+- `GLIBCXX_3.4.29 not found`
+- `ERR_DLOPEN_FAILED`
+- `libstdc++.so.6`
+- `webgpu/dist/linux-x64.dawn.node`
+
+这通常不是脚本逻辑有问题，而是系统运行库太旧，加载 `webgpu` 的原生模块失败。此时就算执行 `sudo apt install libstdc++6`，也不一定能解决，因为当前发行版的软件源本身可能只提供较旧版本的 `libstdc++`。
+
+推荐的 Linux 版本：
+
+- Ubuntu 22.04 及以上
+- 更推荐 Ubuntu 24.04
+- Debian 12 及以上
+
+如果你遇到上面的错误，更推荐这样处理：
+
+- 升级你的 Linux / WSL 发行版
+- 临时转换需求直接改用网页前端
+- 如果你本机 Windows 环境正常，也可以直接在 Windows 下使用 Python CLI
+
+对于较老的 Linux / WSL，升级发行版通常比手工折腾 `libstdc++` 更稳妥。
 
 ### 1. 只下载 SuperSplat 公开资源
 
@@ -97,6 +123,8 @@ python tools/python/supersplat_to_ply.py "https://superspl.at/scene/67841e9d"
 python tools/python/supersplat_to_ply.py "https://superspl.at/scene/67841e9d" --overwrite
 python tools/python/supersplat_to_ply.py "https://superspl.at/scene/67841e9d" --workdir ./downloads -o ./output/scene.ply
 ```
+
+如果这里遇到 Linux / WSL 运行库错误，更推荐升级发行版或直接使用网页前端。
 
 ### 3. LOD 场景按级别拆分导出
 
@@ -170,7 +198,7 @@ npm run preview
 
 限制：
 
-- 超大的 LOD 场景仍可能受浏览器内存限制
+- 超大的 LOD 场景仍可能受到浏览器内存限制
 - 大场景建议使用 Python CLI
 - 如果未来目标站点修改了 CORS 策略，纯前端方案可能会失效
 
@@ -178,6 +206,7 @@ npm run preview
 
 - 小中型场景、临时体验：直接使用网页版本
 - 超大 LOD 场景、批处理：使用 `tools/python/supersplat_to_ply.py`
+- 旧版 Linux / WSL 遇到 `GLIBCXX` 或 `webgpu` 错误：优先升级发行版，或直接使用网页前端
 
 ## References
 
