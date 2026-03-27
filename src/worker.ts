@@ -3,13 +3,12 @@ import {
   WebPCodec,
   combine,
   getInputFormat,
-  getOutputFormat,
   readFile,
-  writeFile,
 } from "@playcanvas/splat-transform";
 import type { FileSystem, Writer } from "@playcanvas/splat-transform/dist/lib/io/write/file-system";
 import webpWasmUrl from "@playcanvas/splat-transform/lib/webp.wasm?url";
 
+import { writeCanonical3dgsPly } from "./lib/canonical-ply";
 import { fetchJson, resolveSceneInput } from "./lib/supersplat";
 import type {
   CacheInfo,
@@ -204,31 +203,6 @@ class OpfsWriteFileSystem implements FileSystem {
   }
 }
 
-async function writeResponseToOpfs(path: string, response: Response): Promise<void> {
-  const fileHandle = await getFileHandleForPath(path, true);
-  const writable = await fileHandle.createWritable();
-
-  try {
-    if (!response.body) {
-      await writable.write(await response.arrayBuffer());
-      return;
-    }
-
-    const reader = response.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      if (value) {
-        await writable.write(value);
-      }
-    }
-  } finally {
-    await writable.close();
-  }
-}
-
 function createUrlReadTarget(inputUrl: string): { fileSystem: UrlReadFileSystem; filename: string } {
   const parsed = new URL(inputUrl);
   const filename = parsed.pathname.split("/").filter(Boolean).pop();
@@ -296,15 +270,7 @@ async function convertInputsToPly(
   });
 
   const outputFs = new OpfsWriteFileSystem(outputBasePath);
-  await writeFile(
-    {
-      filename: outputName,
-      outputFormat: getOutputFormat(outputName, {}),
-      dataTable: merged,
-      options: {},
-    },
-    outputFs,
-  );
+  await writeCanonical3dgsPly(outputName, merged, outputFs);
 
   const opfsPath = `${outputBasePath}/${outputName}`;
   return {
@@ -325,30 +291,18 @@ async function buildDownloads(
   const outputBaseName = resolved.sceneHash || "supersplat-scene";
 
   if (resolved.kind === "ply") {
-    status(request.id, "Downloading direct PLY file into browser cache", {
-      detectedKind: resolved.kind,
-      contentUrl: resolved.contentUrl,
+    const download = await convertInputsToPly(
+      request,
+      resolved,
+      [resolved.contentUrl],
+      `${outputBaseName}.ply`,
+      "Canonicalizing direct PLY into 3DGS format",
+      outputBasePath,
       cacheInfo,
-    });
-    const response = await fetch(resolved.contentUrl, { mode: "cors" });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch direct PLY: HTTP ${response.status}`);
-    }
-
-    const outputName = `${outputBaseName}.ply`;
-    const opfsPath = `${outputBasePath}/${outputName}`;
-    await writeResponseToOpfs(opfsPath, response);
+    );
 
     return {
-      downloads: [
-        {
-          storage: "opfs",
-          fileName: outputName,
-          mimeType: "application/octet-stream",
-          opfsPath,
-          size: await statOpfsFile(opfsPath),
-        },
-      ],
+      downloads: [download],
     };
   }
 
