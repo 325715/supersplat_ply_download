@@ -1,4 +1,5 @@
 import {
+  MemoryReadFileSystem,
   UrlReadFileSystem,
   WebPCodec,
   combine,
@@ -13,6 +14,7 @@ import { fetchJson, resolveSceneInput } from "./lib/supersplat";
 import type {
   CacheInfo,
   LodInfo,
+  ProgressInfo,
   ResolveResult,
   WorkerDownload,
   WorkerMessage,
@@ -24,9 +26,29 @@ interface LodRootMeta {
   filenames?: string[];
 }
 
+type PlannedDownloadTask =
+  | {
+      kind: "meta";
+      url: string;
+      localPath: string;
+      bytes: Uint8Array;
+    }
+  | {
+      kind: "asset";
+      url: string;
+      localPath: string;
+    };
+
+type DownloadPlanSummary = {
+  tasks: PlannedDownloadTask[];
+  size: number;
+  entryCount: number;
+};
+
 WebPCodec.wasmUrl = webpWasmUrl;
 
 const workerScope = self as DedicatedWorkerGlobalScope;
+const textEncoder = new TextEncoder();
 
 function post(message: WorkerMessage): void {
   workerScope.postMessage(message);
@@ -43,6 +65,14 @@ function status(
     message,
     ...extras,
   });
+}
+
+function makeProgress(current: number, total: number, indeterminate = false): ProgressInfo {
+  return {
+    current,
+    total: Math.max(total, 1),
+    indeterminate,
+  };
 }
 
 function deriveLodLevel(path: string): number | null {
@@ -203,7 +233,33 @@ class OpfsWriteFileSystem implements FileSystem {
   }
 }
 
-function createUrlReadTarget(inputUrl: string): { fileSystem: UrlReadFileSystem; filename: string } {
+class CachedFetchReadFileSystem {
+  private readonly memoryFs = new MemoryReadFileSystem();
+
+  constructor(private readonly baseUrl: string) {}
+
+  async createSource(filename: string, progress?: (loaded: number, total?: number) => void) {
+    const cached = this.memoryFs.get(filename);
+    if (cached) {
+      return this.memoryFs.createSource(filename, progress);
+    }
+
+    const url = new URL(filename, this.baseUrl).toString();
+    const response = await fetch(url, { mode: "cors" });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
+    }
+
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    this.memoryFs.set(filename, bytes);
+    if (progress) {
+      progress(bytes.byteLength, bytes.byteLength);
+    }
+    return this.memoryFs.createSource(filename, progress);
+  }
+}
+
+function createUrlReadTarget(inputUrl: string): { fileSystem: { createSource: (filename: string, progress?: (loaded: number, total?: number) => void) => Promise<unknown> }; filename: string } {
   const parsed = new URL(inputUrl);
   const filename = parsed.pathname.split("/").filter(Boolean).pop();
   if (!filename) {
@@ -212,8 +268,206 @@ function createUrlReadTarget(inputUrl: string): { fileSystem: UrlReadFileSystem;
 
   const baseUrl = new URL("./", parsed).toString();
   return {
-    fileSystem: new UrlReadFileSystem(baseUrl),
+    fileSystem: filename.toLowerCase().endsWith("meta.json")
+      ? new CachedFetchReadFileSystem(baseUrl)
+      : new UrlReadFileSystem(baseUrl),
     filename,
+  };
+}
+
+function collectMetaFiles(node: unknown, files = new Set<string>()): Set<string> {
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      collectMetaFiles(item, files);
+    }
+    return files;
+  }
+
+  if (!node || typeof node !== "object") {
+    return files;
+  }
+
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "files" && Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === "string" && item) {
+          files.add(item);
+        }
+      }
+      continue;
+    }
+    collectMetaFiles(value, files);
+  }
+
+  return files;
+}
+
+function collectLodMetaRefs(meta: LodRootMeta): string[] {
+  const refs: string[] = [];
+
+  if (typeof meta.environment === "string" && meta.environment) {
+    refs.push(meta.environment);
+  }
+
+  if (Array.isArray(meta.filenames)) {
+    for (const item of meta.filenames) {
+      if (typeof item === "string" && item) {
+        refs.push(item);
+      }
+    }
+  }
+
+  return refs;
+}
+
+function resolveRelativePath(baseFilePath: string, relativePath: string): string {
+  return new URL(relativePath, `https://local.invalid/${baseFilePath}`).pathname.replace(/^\/+/, "");
+}
+
+async function fetchText(url: string): Promise<string> {
+  const response = await fetch(url, { mode: "cors" });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
+  }
+  return response.text();
+}
+
+async function fetchBytes(url: string): Promise<Uint8Array> {
+  const response = await fetch(url, { mode: "cors" });
+  if (!response.ok) {
+    throw new Error(`Failed to download ${url}: HTTP ${response.status}`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+async function writeOpfsFile(fs: FileSystem, filename: string, data: Uint8Array): Promise<void> {
+  const writer = await fs.createWriter(filename);
+  await writer.write(data);
+  await writer.close();
+}
+
+async function planMetaTree(
+  request: WorkerRequest,
+  resolved: ResolveResult,
+  metaUrl: string,
+  localMetaPath: string,
+  cacheInfo: CacheInfo,
+  visitedMetaUrls: Set<string>,
+): Promise<DownloadPlanSummary> {
+  const normalizedUrl = new URL(metaUrl).toString();
+  if (visitedMetaUrls.has(normalizedUrl)) {
+    return {
+      tasks: [],
+      size: 0,
+      entryCount: 0,
+    };
+  }
+  visitedMetaUrls.add(normalizedUrl);
+
+  status(request.id, `Scanning ${localMetaPath}`, {
+    detectedKind: resolved.kind,
+    contentUrl: resolved.contentUrl,
+    detail: normalizedUrl,
+    cacheInfo,
+    progress: makeProgress(0, 1, true),
+  });
+
+  const metaText = await fetchText(normalizedUrl);
+  const metaBytes = textEncoder.encode(metaText);
+  const tasks: PlannedDownloadTask[] = [{
+    kind: "meta",
+    url: normalizedUrl,
+    localPath: localMetaPath,
+    bytes: metaBytes,
+  }];
+  let size = metaBytes.byteLength;
+  let entryCount = 1;
+
+  const meta = JSON.parse(metaText) as LodRootMeta;
+
+  for (const assetName of Array.from(collectMetaFiles(meta)).sort()) {
+    tasks.push({
+      kind: "asset",
+      url: new URL(assetName, normalizedUrl).toString(),
+      localPath: resolveRelativePath(localMetaPath, assetName),
+    });
+    entryCount += 1;
+  }
+
+  for (const childRef of collectLodMetaRefs(meta)) {
+    const childSummary = await planMetaTree(
+      request,
+      resolved,
+      new URL(childRef, normalizedUrl).toString(),
+      resolveRelativePath(localMetaPath, childRef),
+      cacheInfo,
+      visitedMetaUrls,
+    );
+    tasks.push(...childSummary.tasks);
+    size += childSummary.size;
+    entryCount += childSummary.entryCount;
+  }
+
+  return {
+    tasks,
+    size,
+    entryCount,
+  };
+}
+
+async function downloadOriginalStreamedLod(
+  request: WorkerRequest,
+  resolved: ResolveResult,
+  outputBaseName: string,
+  outputBasePath: string,
+  cacheInfo: CacheInfo,
+): Promise<WorkerDownload> {
+  const rootFileName = new URL(resolved.contentUrl).pathname.split("/").filter(Boolean).pop() ?? "lod-meta.json";
+  const localRootPath = `${outputBaseName}/${rootFileName}`;
+  const outputFs = new OpfsWriteFileSystem(outputBasePath);
+
+  const plan = await planMetaTree(
+    request,
+    resolved,
+    resolved.contentUrl,
+    localRootPath,
+    cacheInfo,
+    new Set<string>(),
+  );
+
+  const totalTasks = Math.max(plan.tasks.length, 1);
+  let downloadedCount = 0;
+  let downloadedSize = 0;
+
+  for (const task of plan.tasks) {
+    status(request.id, `Downloading ${task.localPath}`, {
+      detectedKind: resolved.kind,
+      contentUrl: resolved.contentUrl,
+      detail: task.url,
+      cacheInfo,
+      progress: makeProgress(downloadedCount, totalTasks),
+    });
+
+    if (task.kind === "meta") {
+      await writeOpfsFile(outputFs, task.localPath, task.bytes);
+      downloadedSize += task.bytes.byteLength;
+    } else {
+      const assetBytes = await fetchBytes(task.url);
+      await writeOpfsFile(outputFs, task.localPath, assetBytes);
+      downloadedSize += assetBytes.byteLength;
+    }
+
+    downloadedCount += 1;
+    await yieldToBrowser();
+  }
+
+  return {
+    storage: "opfs-directory",
+    fileName: outputBaseName,
+    size: downloadedSize || plan.size,
+    opfsPath: `${outputBasePath}/${outputBaseName}`,
+    entryCount: plan.entryCount,
+    rootFileName,
   };
 }
 
@@ -226,6 +480,8 @@ async function convertInputsToPly(
   outputBasePath: string,
   cacheInfo: CacheInfo,
   lodInfo?: LodInfo,
+  progressBase = 0,
+  progressTotal = inputUrls.length + 1,
 ): Promise<WorkerDownload> {
   let merged: Awaited<ReturnType<typeof readFile>>[number] | null = null;
 
@@ -237,6 +493,7 @@ async function convertInputsToPly(
       detail: url,
       cacheInfo,
       lodInfo,
+      progress: makeProgress(progressBase + index, progressTotal),
     });
 
     const readTarget = createUrlReadTarget(url);
@@ -267,6 +524,7 @@ async function convertInputsToPly(
     contentUrl: resolved.contentUrl,
     cacheInfo,
     lodInfo,
+    progress: makeProgress(progressBase + inputUrls.length, progressTotal),
   });
 
   const outputFs = new OpfsWriteFileSystem(outputBasePath);
@@ -299,11 +557,23 @@ async function buildDownloads(
       "Canonicalizing direct PLY into 3DGS format",
       outputBasePath,
       cacheInfo,
+      undefined,
+      0,
+      2,
     );
 
     return {
       downloads: [download],
     };
+  }
+
+  if (request.preserveStreamedLod && resolved.kind !== "lod") {
+    status(request.id, "Preserve streamed LOD was requested, but this scene is not a streamed LOD payload. Falling back to PLY.", {
+      detectedKind: resolved.kind,
+      contentUrl: resolved.contentUrl,
+      cacheInfo,
+      progress: makeProgress(0, 1, true),
+    });
   }
 
   if (resolved.kind !== "lod") {
@@ -312,6 +582,7 @@ async function buildDownloads(
         detectedKind: resolved.kind,
         contentUrl: resolved.contentUrl,
         cacheInfo,
+        progress: makeProgress(0, 1, true),
       });
     }
 
@@ -323,14 +594,40 @@ async function buildDownloads(
       "Converting single published payload to PLY",
       outputBasePath,
       cacheInfo,
+      undefined,
+      0,
+      2,
     );
     return { downloads: [download] };
+  }
+
+  if (request.preserveStreamedLod) {
+    status(request.id, "Scanning streamed LOD payload layout", {
+      detectedKind: resolved.kind,
+      contentUrl: resolved.contentUrl,
+      cacheInfo,
+      detail: "The complete folder tree will be preserved so it can be exported and reused as a streamed scene.",
+      progress: makeProgress(0, 1, true),
+    });
+
+    const download = await downloadOriginalStreamedLod(
+      request,
+      resolved,
+      outputBaseName,
+      outputBasePath,
+      cacheInfo,
+    );
+
+    return {
+      downloads: [download],
+    };
   }
 
   status(request.id, "Fetching streamed LOD manifest", {
     detectedKind: resolved.kind,
     contentUrl: resolved.contentUrl,
     cacheInfo,
+    progress: makeProgress(0, 1, true),
   });
   const root = await fetchJson<LodRootMeta>(resolved.contentUrl);
   const rootUrl = new URL(resolved.contentUrl);
@@ -360,6 +657,7 @@ async function buildDownloads(
     cacheInfo,
     lodInfo,
     detail: `Available LODs: ${allLevels.join(", ")}`,
+    progress: makeProgress(0, 1),
   });
 
   if (!request.splitLods) {
@@ -367,6 +665,7 @@ async function buildDownloads(
       ...(environmentUrl && request.includeEnvironment ? [environmentUrl] : []),
       ...selectedEntries.map((entry) => entry.url),
     ];
+    const totalProgressSteps = mergedInputs.length + 1;
     const download = await convertInputsToPly(
       request,
       resolved,
@@ -378,6 +677,8 @@ async function buildDownloads(
       outputBasePath,
       cacheInfo,
       lodInfo,
+      0,
+      totalProgressSteps,
     );
     return { downloads: [download], lodInfo };
   }
@@ -393,6 +694,8 @@ async function buildDownloads(
   }
 
   const downloads: WorkerDownload[] = [];
+  const totalProgressSteps = selectedLevels.reduce((sum, level) => sum + ((groups.get(level) ?? []).length + 1), 0);
+  let progressBase = 0;
   for (const level of selectedLevels) {
     const urls = groups.get(level) ?? [];
     downloads.push(
@@ -405,8 +708,11 @@ async function buildDownloads(
         outputBasePath,
         cacheInfo,
         lodInfo,
+        progressBase,
+        totalProgressSteps,
       ),
     );
+    progressBase += urls.length + 1;
   }
 
   return { downloads, lodInfo };
@@ -425,15 +731,18 @@ workerScope.addEventListener("message", async (event: MessageEvent<WorkerRequest
     status(request.id, "Preparing browser cache", {
       cacheInfo,
       detail: "Results will be written into OPFS first, then saved out on demand.",
+      progress: makeProgress(0, 1, true),
     });
     status(request.id, "Resolving scene input", {
       cacheInfo,
+      progress: makeProgress(0, 1, true),
     });
     const resolved = await resolveSceneInput(request.sceneUrl);
     status(request.id, `Detected ${resolved.kind} payload`, {
       detectedKind: resolved.kind,
       contentUrl: resolved.contentUrl,
       cacheInfo,
+      progress: makeProgress(0, 1, true),
     });
 
     const { downloads, lodInfo } = await buildDownloads(request, resolved, outputBasePath, cacheInfo);
@@ -446,6 +755,7 @@ workerScope.addEventListener("message", async (event: MessageEvent<WorkerRequest
       cleanupPath: outputBasePath,
       lodInfo,
       cacheInfo,
+      progress: makeProgress(1, 1),
     } satisfies WorkerMessage);
   } catch (error) {
     try {
@@ -459,6 +769,7 @@ workerScope.addEventListener("message", async (event: MessageEvent<WorkerRequest
       requestId: request.id,
       error: formatWorkerError(error),
       cacheInfo,
+      progress: makeProgress(1, 1),
     });
   }
 });

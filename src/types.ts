@@ -18,23 +18,32 @@ export interface WorkerRequest {
   includeEnvironment: boolean;
   lodMinLevel: number | null;
   lodMaxLevel: number | null;
+  preserveStreamedLod: boolean;
 }
 
-interface WorkerDownloadBase {
+interface WorkerFileDownloadBase {
   fileName: string;
   mimeType: string;
   size: number;
 }
 
 export type WorkerDownload =
-  | (WorkerDownloadBase & {
+  | (WorkerFileDownloadBase & {
       storage: "memory";
       buffer: ArrayBuffer;
     })
-  | (WorkerDownloadBase & {
+  | (WorkerFileDownloadBase & {
       storage: "opfs";
       opfsPath: string;
-    });
+    })
+  | {
+      storage: "opfs-directory";
+      fileName: string;
+      size: number;
+      opfsPath: string;
+      entryCount: number;
+      rootFileName: string;
+    };
 
 export interface LodInfo {
   availableLevels: number[];
@@ -48,6 +57,12 @@ export interface CacheInfo {
   label: string;
 }
 
+export interface ProgressInfo {
+  current: number;
+  total: number;
+  indeterminate?: boolean;
+}
+
 export type WorkerMessage =
   | {
       type: "status";
@@ -58,6 +73,7 @@ export type WorkerMessage =
       contentUrl?: string;
       lodInfo?: LodInfo;
       cacheInfo?: CacheInfo;
+      progress?: ProgressInfo;
     }
   | {
       type: "done";
@@ -68,10 +84,12 @@ export type WorkerMessage =
       cleanupPath: string;
       lodInfo?: LodInfo;
       cacheInfo: CacheInfo;
+      progress?: ProgressInfo;
     }
   | {
       type: "error";
       requestId: string;
       error: string;
       cacheInfo?: CacheInfo;
+      progress?: ProgressInfo;
     };

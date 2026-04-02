@@ -46,6 +46,14 @@
 
             <div class="toggle-grid">
               <label class="toggle-card">
+                <input id="preserve-streamed-lod" type="checkbox" />
+                <span>
+                  <strong data-i18n="form.preserveTitle">保留原始流式 LOD</strong>
+                  <small data-i18n="form.preserveDesc">仅对流式场景生效。会下载完整目录结构，便于直接交回 SuperSplat 使用。</small>
+                </span>
+              </label>
+
+              <label class="toggle-card">
                 <input id="split-lods" type="checkbox" checked />
                 <span>
                   <strong data-i18n="form.splitTitle">分级导出 LOD</strong>
@@ -58,6 +66,14 @@
                 <span>
                   <strong data-i18n="form.envTitle">包含环境层</strong>
                   <small data-i18n="form.envDesc">如果场景提供环境 splats，会一起并入导出结果。</small>
+                </span>
+              </label>
+
+              <label class="toggle-card">
+                <input id="export-as-zip" type="checkbox" />
+                <span>
+                  <strong data-i18n="form.zipTitle">导出为 ZIP</strong>
+                  <small data-i18n="form.zipDesc">把当前结果打包成一个 zip 文件下载。分级 LOD 和目录结构都会一起打包。</small>
                 </span>
               </label>
             </div>
@@ -92,6 +108,13 @@
           <div id="status-banner" class="status-banner status-banner-idle">
             <p id="status-banner-title" class="status-banner-title">Ready</p>
             <p id="status-banner-detail" class="status-banner-detail">Paste a scene URL to begin.</p>
+          </div>
+
+          <div class="task-progress" aria-label="Task progress">
+            <div class="task-progress-track">
+              <div id="task-progress-bar" class="task-progress-bar task-progress-bar-idle"></div>
+            </div>
+            <p id="task-progress-meta" class="task-progress-meta"></p>
           </div>
 
           <div class="status-list">
@@ -144,6 +167,7 @@
         </section>
       </main>
     </div>
+    <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
