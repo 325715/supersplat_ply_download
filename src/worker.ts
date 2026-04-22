@@ -4,12 +4,13 @@ import {
   WebPCodec,
   combine,
   getInputFormat,
+  getOutputFormat,
   readFile,
+  writeFile,
 } from "@playcanvas/splat-transform";
 import type { FileSystem, Writer } from "@playcanvas/splat-transform/dist/lib/io/write/file-system";
 import webpWasmUrl from "@playcanvas/splat-transform/lib/webp.wasm?url";
 
-import { writeCanonical3dgsPly } from "./lib/canonical-ply";
 import { fetchJson, resolveSceneInput } from "./lib/supersplat";
 import type {
   CacheInfo,
@@ -528,7 +529,15 @@ async function convertInputsToPly(
   });
 
   const outputFs = new OpfsWriteFileSystem(outputBasePath);
-  await writeCanonical3dgsPly(outputName, merged, outputFs);
+  await writeFile(
+    {
+      filename: outputName,
+      outputFormat: getOutputFormat(outputName, {}),
+      dataTable: merged,
+      options: {},
+    },
+    outputFs,
+  );
 
   const opfsPath = `${outputBasePath}/${outputName}`;
   return {

@@ -23,7 +23,6 @@ from urllib.parse import urlparse
 from supersplat_sog_downloader import (
     DownloaderError,
     collect_lod_meta_refs,
-    classify_content_url,
     download_supersplat_scene,
     extract_scene_hash,
     infer_output_dir,
@@ -38,17 +37,6 @@ LOCAL_EXPORT_SCRIPT = (
 def is_url(value: str) -> bool:
     parsed = urlparse(value)
     return parsed.scheme in {"http", "https"}
-
-
-def resolve_local_meta_path(value: str) -> Path:
-    path = Path(value).expanduser().resolve()
-    if path.is_dir():
-        path = path / "meta.json"
-    if not path.exists():
-        raise DownloaderError(f"Local meta.json was not found: {path}")
-    if path.name != "meta.json":
-        raise DownloaderError("Local input must be meta.json or a directory containing meta.json.")
-    return path
 
 
 def resolve_local_input_path(value: str) -> Path:
@@ -79,7 +67,7 @@ def build_local_export_command(
 ) -> list[str]:
     node = find_command(["node", "node.exe"])
     if not node:
-        raise DownloaderError("Could not find 'node'. Please install Node.js to export canonical 3DGS PLY.")
+        raise DownloaderError("Could not find 'node'. Please install Node.js to export PLY with @playcanvas/splat-transform.")
 
     if not LOCAL_EXPORT_SCRIPT.exists():
         raise DownloaderError(f"Local exporter script was not found: {LOCAL_EXPORT_SCRIPT}")
@@ -215,7 +203,7 @@ def run_transform(input_paths: list[Path], ply_path: Path) -> None:
     if local_result.returncode == 0:
         return
 
-    raise DownloaderError(f"Local canonical exporter exited with code {local_result.returncode}")
+    raise DownloaderError(f"Local @playcanvas/splat-transform exporter exited with code {local_result.returncode}")
 
 
 def resolve_split_output_paths(

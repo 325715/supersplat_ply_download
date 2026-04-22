@@ -2,6 +2,15 @@
 
 const HASH_RE = /^[A-Za-z0-9]+$/;
 const CLOUD_FRONT_HOST = "d28zzqy0iyovbz.cloudfront.net";
+const VERSION_RE = /\/([A-Za-z0-9]+)\/v(\d+)\//;
+const MAX_CONTENT_VERSION = 20;
+const CONTENT_SUFFIXES = [
+  "lod-meta.json",
+  "meta.json",
+  "scene.compressed.ply",
+  "scene.sog",
+  "scene.ply",
+] as const;
 
 function extractHashFromUrl(value: string): string | null {
   try {
@@ -64,7 +73,7 @@ export function normalizeSceneInput(value: string): string {
   try {
     const url = new URL(trimmed);
     if (url.hostname === CLOUD_FRONT_HOST) {
-      const sceneMatch = url.pathname.match(/\/([A-Za-z0-9]+)\/v1\//);
+      const sceneMatch = url.pathname.match(VERSION_RE);
       if (!sceneMatch) {
         throw new Error("Could not derive the scene hash from this direct content URL.");
       }
@@ -90,34 +99,36 @@ async function probeUrl(url: string): Promise<boolean> {
   }
 }
 
-export async function resolveSceneInput(value: string): Promise<ResolveResult> {
-  const trimmed = value.trim();
+function getVersionCandidates(preferredVersion?: number | null): number[] {
+  const seen = new Set<number>();
+  const candidates: number[] = [];
 
-  try {
-    const directUrl = new URL(trimmed);
-    if (directUrl.hostname === CLOUD_FRONT_HOST) {
-      return {
-        sceneHash: normalizeSceneInput(trimmed),
-        contentUrl: directUrl.toString(),
-        kind: classifyContentUrl(directUrl.toString()),
-      };
-    }
-  } catch {
-    // Fall back to hash-based resolution.
+  if (preferredVersion && preferredVersion > 0) {
+    seen.add(preferredVersion);
+    candidates.push(preferredVersion);
   }
 
-  const sceneHash = normalizeSceneInput(trimmed);
-  const base = `https://${CLOUD_FRONT_HOST}/${sceneHash}/v1/`;
-  const candidates = [
-    `${base}lod-meta.json`,
-    `${base}meta.json`,
-    `${base}scene.compressed.ply`,
-    `${base}scene.sog`,
-    `${base}scene.ply`,
-  ];
+  for (let version = MAX_CONTENT_VERSION; version >= 1; version -= 1) {
+    if (seen.has(version)) {
+      continue;
+    }
+    seen.add(version);
+    candidates.push(version);
+  }
 
-  for (const candidate of candidates) {
-    if (await probeUrl(candidate)) {
+  return candidates;
+}
+
+async function resolveVersionedScene(sceneHash: string, preferredVersion?: number | null): Promise<ResolveResult | null> {
+  for (const version of getVersionCandidates(preferredVersion)) {
+    const base = `https://${CLOUD_FRONT_HOST}/${sceneHash}/v${version}/`;
+
+    for (const suffix of CONTENT_SUFFIXES) {
+      const candidate = `${base}${suffix}`;
+      if (!(await probeUrl(candidate))) {
+        continue;
+      }
+
       return {
         sceneHash,
         contentUrl: candidate,
@@ -126,8 +137,43 @@ export async function resolveSceneInput(value: string): Promise<ResolveResult> {
     }
   }
 
+  return null;
+}
+
+export async function resolveSceneInput(value: string): Promise<ResolveResult> {
+  const trimmed = value.trim();
+
+  try {
+    const directUrl = new URL(trimmed);
+    if (directUrl.hostname === CLOUD_FRONT_HOST) {
+      const versionMatch = directUrl.pathname.match(VERSION_RE);
+      try {
+        return {
+          sceneHash: normalizeSceneInput(trimmed),
+          contentUrl: directUrl.toString(),
+          kind: classifyContentUrl(directUrl.toString()),
+        };
+      } catch {
+        if (versionMatch) {
+          const resolved = await resolveVersionedScene(versionMatch[1], Number(versionMatch[2]));
+          if (resolved) {
+            return resolved;
+          }
+        }
+      }
+    }
+  } catch {
+    // Fall back to hash-based resolution.
+  }
+
+  const sceneHash = normalizeSceneInput(trimmed);
+  const resolved = await resolveVersionedScene(sceneHash);
+  if (resolved) {
+    return resolved;
+  }
+
   throw new Error(
-    "Could not find a public downloadable scene payload for this hash. The scene may be private, deleted, or use a format this app does not support yet."
+    "Could not find a public downloadable scene payload for this hash. The scene may be private, deleted, or published in a format this app does not support yet."
   );
 }
 
