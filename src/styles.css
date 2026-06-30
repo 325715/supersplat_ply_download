@@ -24,7 +24,7 @@
   --shadow: 0 24px 60px rgba(15, 23, 42, 0.06);
   --radius-lg: 24px;
   --radius-md: 16px;
-  --sans: "Inter", "Noto Sans SC", system-ui, sans-serif;
+  --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", "Source Han Sans SC", sans-serif;
   --mono: "SFMono-Regular", "JetBrains Mono", Consolas, monospace;
 }
 
