@@ -1,7 +1,7 @@
 {
     "buildCommand": "npm run build",
     "installCommand": "npm install",
-    "outputDirectory": "public",
+    "outputDirectory": "dist",
     "nodeVersion": "22.11.0",
     "headers": [
         {

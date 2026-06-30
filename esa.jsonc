@@ -1,9 +1,8 @@
 {
   "name": "supersplat-ply-download",
-  "entry": "./dist/worker.js",
   "installCommand": "npm install",
   "buildCommand": "npm run build",
   "assets": {
-    "directory": "./public"
+    "directory": "./dist"
   }
 }
