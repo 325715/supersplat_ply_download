@@ -2,7 +2,7 @@
     "buildCommand": "npm run build",
     "installCommand": "npm install",
     "outputDirectory": "dist",
-    "nodeVersion": "22.13.0",
+    "nodeVersion": "22.17.1",
     "headers": [
         {
             "source": "/*",
