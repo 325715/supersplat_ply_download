@@ -5,13 +5,28 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev:workers": "wrangler dev src/worker.ts",
+    "dev:pages": "wrangler pages dev public --compatibility-date=2025-12-29",
+    "build:client": "vite build",
+    "build:worker": "tsc -p tsconfig.build.json",
+    "build": "npm run build:client && npm run build:worker",
+    "preview": "vite preview",
+    "esa:version": "npx esa-cli -v",
+    "esa:login": "npx esa-cli login",
+    "esa:dev": "npx esa-cli dev",
+    "esa:deploy": "npm run build && npx esa-cli deploy",
+    "deploy:workers": "wrangler deploy src/worker.ts",
+    "deploy:pages": "wrangler pages deploy public"
   },
   "dependencies": {
     "@playcanvas/splat-transform": "^1.9.2",
     "playcanvas": "^2.17.2",
     "typescript": "^5.9.3",
     "vite": "^8.0.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251201.0",
+    "esa-cli": "^1.0.3",
+    "wrangler": "^3.100.0"
   }
 }

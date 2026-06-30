@@ -201,7 +201,7 @@ const copy: CopyMap = {
 };
 
 const pickerWindow = window as WindowWithPickers;
-const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+const worker = new Worker(new URL("./client-worker.ts", import.meta.url), { type: "module" });
 let locale: Locale = (localStorage.getItem(LOCALE_KEY) as Locale) || (navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en");
 let activeRequestId: string | null = null;
 let activeMemoryUrls: string[] = [];

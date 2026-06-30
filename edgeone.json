@@ -1,0 +1,21 @@
+{
+    "buildCommand": "npm run build",
+    "installCommand": "npm install",
+    "outputDirectory": "public",
+    "nodeVersion": "22.11.0",
+    "headers": [
+        {
+            "source": "/*",
+            "headers": [
+                {
+                    "key": "X-Frame-Options",
+                    "value": "DENY"
+                },
+                {
+                    "key": "Access-Control-Allow-Origin",
+                    "value": "*"
+                }
+            ]
+        }
+    ]
+}
