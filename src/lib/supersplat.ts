@@ -1,4 +1,4 @@
-import type { ResolveResult, SceneKind } from "../types";
+﻿import type { ResolveResult, SceneKind } from "../types";
 
 const HASH_RE = /^[A-Za-z0-9]+$/;
 const CLOUD_FRONT_HOST = "d28zzqy0iyovbz.cloudfront.net";
@@ -95,16 +95,7 @@ async function probeUrl(url: string): Promise<boolean> {
     });
     return response.ok;
   } catch {
-    try {
-      const proxyUrl = `/api/proxy?url=${encodeURIComponent(url)}`;
-      const response = await fetch(proxyUrl, {
-        method: "HEAD",
-        redirect: "follow",
-      });
-      return response.ok;
-    } catch {
-      return false;
-    }
+    return false;
   }
 }
 
@@ -187,24 +178,11 @@ export async function resolveSceneInput(value: string): Promise<ResolveResult> {
 }
 
 export async function fetchJson<T>(url: string): Promise<T> {
-  try {
-    const response = await fetch(url, { mode: "cors" });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
-    }
-    return (await response.json()) as T;
-  } catch (err) {
-    try {
-      const proxyUrl = `/api/proxy?url=${encodeURIComponent(url)}`;
-      const response = await fetch(proxyUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch ${url} via proxy: HTTP ${response.status}`);
-      }
-      return (await response.json()) as T;
-    } catch {
-      throw err;
-    }
+  const response = await fetch(url, { mode: "cors" });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
   }
+  return (await response.json()) as T;
 }
 
 export function formatBytes(value: number): string {
